@@ -4,14 +4,14 @@ const URGENCY = {
   1: { label: '常规', className: 'routine' }
 };
 
-export default function LetterCard({ letter, islands, compact = false, children }) {
+export default function LetterCard({ letter, islands, compact = false, selected = false, children }) {
   const islandMap = new Map(islands.map((island) => [island.id, island]));
   const origin = islandMap.get(letter.originIslandId);
   const recipient = islandMap.get(letter.recipientIslandId);
   const urgency = URGENCY[letter.urgency];
 
   return (
-    <article className={`letter-card ${urgency.className} ${compact ? 'compact' : ''}`}>
+    <article className={`letter-card ${urgency.className} ${compact ? 'compact' : ''} ${selected ? 'selected' : ''}`}>
       <div className="letter-topline">
         <span className={`urgency-tag ${urgency.className}`}>{urgency.label}</span>
         <code>{letter.id}</code>

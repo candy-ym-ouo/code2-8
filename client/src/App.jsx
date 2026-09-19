@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { gameApi } from './api.js';
+import { planBatchAssignment } from './utils.js';
+import DispatchConfirmDialog from './components/DispatchConfirmDialog.jsx';
 import FleetPanel from './components/FleetPanel.jsx';
 import LetterCard from './components/LetterCard.jsx';
 import MapPanel from './components/MapPanel.jsx';
@@ -12,6 +14,8 @@ function App() {
   const [assignments, setAssignments] = useState([]);
   const [previewState, setPreviewState] = useState(null);
   const [report, setReport] = useState(null);
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [confirmingDispatch, setConfirmingDispatch] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -79,6 +83,24 @@ function App() {
 
   const assignedIds = useMemo(() => new Set(assignments.map((assignment) => assignment.letterId)), [assignments]);
   const unassignedLetters = openLetters.filter((letter) => !assignedIds.has(letter.id));
+  const selectedLetters = unassignedLetters.filter((letter) => selectedIds.has(letter.id));
+  const selectedWeight = selectedLetters.reduce((sum, letter) => sum + letter.weight, 0);
+
+  function toggleLetterSelection(letterId) {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (next.has(letterId)) {
+        next.delete(letterId);
+      } else {
+        next.add(letterId);
+      }
+      return next;
+    });
+  }
+
+  function selectAllUnassigned() {
+    setSelectedIds(new Set(unassignedLetters.map((letter) => letter.id)));
+  }
 
   function assignLetter(letter, courierId) {
     setAssignments((current) => {
@@ -100,6 +122,26 @@ function App() {
 
   function unassignLetter(letterId) {
     setAssignments((current) => current.filter((assignment) => assignment.letterId !== letterId));
+  }
+
+  function assignSelectedToCourier(courierId) {
+    const courier = game.couriers.find((item) => item.id === courierId);
+    const result = planBatchAssignment({
+      assignments,
+      letters: game.letters,
+      courier,
+      letterIds: selectedLetters.map((letter) => letter.id)
+    });
+
+    if (!result.ok) {
+      // 整批撤回：方案保持不变，一封也不会装入。
+      setError(`批量分配失败，已整批撤回：${result.issues.join(' ')}`);
+      return;
+    }
+
+    setAssignments(result.assignments);
+    setSelectedIds(new Set());
+    setError('');
   }
 
   function changeTarget(letterId, targetIslandId) {
@@ -127,7 +169,12 @@ function App() {
     });
   }
 
-  async function advanceDay() {
+  function requestAdvance() {
+    if (!preview?.valid || busy) return;
+    setConfirmingDispatch(true);
+  }
+
+  async function confirmAdvance() {
     if (!preview?.valid) return;
     setBusy(true);
     setError('');
@@ -136,13 +183,17 @@ function App() {
       setGame(result.state);
       setReport(result.report);
       setAssignments([]);
+      setSelectedIds(new Set());
       setPreviewState(null);
+      setConfirmingDispatch(false);
     } catch (requestError) {
+      setConfirmingDispatch(false);
       if (requestError.status === 409) {
         try {
           const { state } = await gameApi.getState();
           setGame(state);
           setAssignments([]);
+          setSelectedIds(new Set());
           setPreviewState(null);
         } catch {
           // 保留原始冲突提示；下一次操作或刷新会重新同步。
@@ -162,8 +213,10 @@ function App() {
       const { state } = await gameApi.reset();
       setGame(state);
       setAssignments([]);
+      setSelectedIds(new Set());
       setPreviewState(null);
       setReport(null);
+      setConfirmingDispatch(false);
     } catch (requestError) {
       setError(requestError.message);
     } finally {
@@ -257,6 +310,43 @@ function App() {
               <span className="inbox-progress">{deliveredCount} 封已装载</span>
             </div>
 
+            {unassignedLetters.length > 0 && (
+              <div className="selection-bar">
+                <label className="select-all">
+                  <input
+                    type="checkbox"
+                    checked={selectedLetters.length > 0 && selectedLetters.length === unassignedLetters.length}
+                    onChange={(event) => (event.target.checked ? selectAllUnassigned() : setSelectedIds(new Set()))}
+                    disabled={busy}
+                    aria-label="全选待分配邮件"
+                  />
+                  <span>全选</span>
+                </label>
+                <span className="selection-count">
+                  已选 {selectedLetters.length} 封{selectedLetters.length > 0 ? ` · ${selectedWeight.toFixed(1)} kg` : ''}
+                </span>
+                {selectedLetters.length > 0 && (
+                  <button type="button" className="selection-clear" onClick={() => setSelectedIds(new Set())} disabled={busy}>
+                    清除选择
+                  </button>
+                )}
+              </div>
+            )}
+
+            {selectedLetters.length > 0 && (
+              <div className="batch-bar" role="group" aria-label="批量分配">
+                <span>将 {selectedLetters.length} 封邮件按顺序装入：</span>
+                <div className="assign-buttons">
+                  {game.couriers.map((courier) => (
+                    <button key={courier.id} type="button" disabled={busy} onClick={() => assignSelectedToCourier(courier.id)}>
+                      <i style={{ background: courier.color }} />
+                      {courier.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="inbox-list">
               {unassignedLetters.length === 0 ? (
                 <div className="inbox-empty">
@@ -265,7 +355,17 @@ function App() {
                   <p>检查下方航线并执行当日调度。</p>
                 </div>
               ) : unassignedLetters.map((letter) => (
-                <LetterCard key={letter.id} letter={letter} islands={game.islands}>
+                <LetterCard key={letter.id} letter={letter} islands={game.islands} selected={selectedIds.has(letter.id)}>
+                  <label className="letter-select">
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(letter.id)}
+                      onChange={() => toggleLetterSelection(letter.id)}
+                      disabled={busy}
+                      aria-label={`选择 ${letter.id}`}
+                    />
+                    <span>选择</span>
+                  </label>
                   {letter.status === 'backlog' && <span className="backlog-tag">已积压 {Math.max(0, game.day - letter.day)} 日</span>}
                   <div className="assign-buttons">
                     {game.couriers.map((courier) => (
@@ -323,13 +423,23 @@ function App() {
             type="button"
             className="dispatch-button"
             disabled={busy || !preview?.valid}
-            onClick={advanceDay}
+            onClick={requestAdvance}
           >
             {busy ? '航线结算中...' : '执行当日调度'}
-            <span>{preview?.valid ? '所有航线检查通过' : '先修正调度方案'}</span>
+            <span>{preview?.valid ? '检查通过 · 确认后才会结算' : '先修正调度方案'}</span>
           </button>
         </div>
       </aside>
+
+      <DispatchConfirmDialog
+        open={confirmingDispatch}
+        preview={preview}
+        loadedCount={assignments.length}
+        unassignedCount={unassignedLetters.length}
+        busy={busy}
+        onCancel={() => setConfirmingDispatch(false)}
+        onConfirm={confirmAdvance}
+      />
 
       <ReportDialog report={report} onClose={() => setReport(null)} />
 
