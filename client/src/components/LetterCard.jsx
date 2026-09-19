@@ -4,16 +4,44 @@ const URGENCY = {
   1: { label: '常规', className: 'routine' }
 };
 
-export default function LetterCard({ letter, islands, compact = false, children }) {
+export default function LetterCard({
+  letter,
+  islands,
+  compact = false,
+  selected = false,
+  selectDisabled = false,
+  onToggleSelect,
+  children
+}) {
   const islandMap = new Map(islands.map((island) => [island.id, island]));
   const origin = islandMap.get(letter.originIslandId);
   const recipient = islandMap.get(letter.recipientIslandId);
   const urgency = URGENCY[letter.urgency];
+  const selectable = typeof onToggleSelect === 'function';
+  const handleToggle = () => {
+    if (selectable && !selectDisabled) onToggleSelect();
+  };
 
   return (
-    <article className={`letter-card ${urgency.className} ${compact ? 'compact' : ''}`}>
+    <article
+      className={`letter-card ${urgency.className} ${compact ? 'compact' : ''} ${selectable ? 'selectable' : ''} ${selected ? 'selected' : ''}`}
+      onClick={selectable ? handleToggle : undefined}
+    >
       <div className="letter-topline">
-        <span className={`urgency-tag ${urgency.className}`}>{urgency.label}</span>
+        <span className="letter-topline-left">
+          {selectable && (
+            <input
+              type="checkbox"
+              className="letter-select"
+              checked={selected}
+              disabled={selectDisabled}
+              onChange={handleToggle}
+              onClick={(event) => event.stopPropagation()}
+              aria-label={`选择邮件 ${letter.id}`}
+            />
+          )}
+          <span className={`urgency-tag ${urgency.className}`}>{urgency.label}</span>
+        </span>
         <code>{letter.id}</code>
       </div>
       <h3>{letter.subject}</h3>
@@ -27,7 +55,11 @@ export default function LetterCard({ letter, islands, compact = false, children 
         <span><b>{letter.weight.toFixed(1)}</b> kg</span>
         <span>截止 <b>第{letter.deadlineDay}日 {String(letter.deadlineHour).padStart(2, '0')}:00</b></span>
       </div>
-      {children && <div className="letter-actions">{children}</div>}
+      {children && (
+        <div className="letter-actions" onClick={selectable ? (event) => event.stopPropagation() : undefined}>
+          {children}
+        </div>
+      )}
     </article>
   );
 }

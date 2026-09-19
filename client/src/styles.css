@@ -769,6 +769,79 @@ code {
   border-radius: 50%;
 }
 
+.letter-topline-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.letter-select,
+.batch-select-all input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--cyan);
+  cursor: pointer;
+}
+
+.letter-card.selectable {
+  cursor: pointer;
+  transition: border-color 150ms ease, background 150ms ease, box-shadow 150ms ease;
+}
+
+.letter-card.selected {
+  border-color: rgba(84, 215, 232, 0.55);
+  background: linear-gradient(110deg, rgba(23, 58, 82, 0.92), rgba(12, 34, 52, 0.86));
+  box-shadow: inset 0 0 0 1px rgba(84, 215, 232, 0.22), 0 10px 26px rgba(3, 12, 20, 0.35);
+}
+
+.batch-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(84, 215, 232, 0.045);
+}
+
+.batch-select-all {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #9bb1c5;
+  font-size: 11px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.batch-summary {
+  color: var(--cyan);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.batch-hint {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.batch-clear {
+  padding: 6px 10px;
+  border: 1px solid rgba(126, 173, 201, 0.18);
+  border-radius: 8px;
+  color: #a8bfd1;
+  background: transparent;
+  font-size: 10px;
+  cursor: pointer;
+  transition: 150ms ease;
+}
+
+.batch-clear:hover {
+  color: white;
+  border-color: rgba(255, 123, 123, 0.5);
+}
+
 .backlog-tag {
   flex: 0 0 auto;
   color: var(--red);

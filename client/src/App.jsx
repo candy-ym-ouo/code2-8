@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { gameApi } from './api.js';
+import { planBatchAssignment } from './batchAssign.js';
 import FleetPanel from './components/FleetPanel.jsx';
 import LetterCard from './components/LetterCard.jsx';
 import MapPanel from './components/MapPanel.jsx';
@@ -10,6 +11,7 @@ import WeatherPanel from './components/WeatherPanel.jsx';
 function App() {
   const [game, setGame] = useState(null);
   const [assignments, setAssignments] = useState([]);
+  const [selectedIds, setSelectedIds] = useState([]);
   const [previewState, setPreviewState] = useState(null);
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -80,7 +82,46 @@ function App() {
   const assignedIds = useMemo(() => new Set(assignments.map((assignment) => assignment.letterId)), [assignments]);
   const unassignedLetters = openLetters.filter((letter) => !assignedIds.has(letter.id));
 
+  const lettersById = useMemo(
+    () => new Map((game?.letters ?? []).map((letter) => [letter.id, letter])),
+    [game]
+  );
+  const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+  // 选中的邮件保持收件箱展示顺序（紧急度 / 截止时间），批量装入时按此顺序插入航线末尾。
+  const selectedLetters = unassignedLetters.filter((letter) => selectedIdSet.has(letter.id));
+  const selectedWeight = selectedLetters.reduce((sum, letter) => sum + letter.weight, 0);
+
+  function toggleSelect(letterId) {
+    setSelectedIds((current) => (
+      current.includes(letterId)
+        ? current.filter((id) => id !== letterId)
+        : [...current, letterId]
+    ));
+  }
+
+  function toggleSelectAll() {
+    const unassignedIds = unassignedLetters.map((letter) => letter.id);
+    const allSelected = unassignedIds.length > 0 && unassignedIds.every((id) => selectedIdSet.has(id));
+    setSelectedIds(allSelected ? [] : unassignedIds);
+  }
+
+  function assignSelectedBatch(courierId) {
+    if (!game || selectedLetters.length === 0) return;
+    const courier = game.couriers.find((item) => item.id === courierId);
+    const result = planBatchAssignment({ assignments, letters: selectedLetters, courier, lettersById });
+    if (!result.ok) {
+      // 整批撤回：方案保持不变，仅提示原因；不触发任何结算。
+      setError(`批量分配已撤回：${result.issues.map((issue) => issue.message).join('；')}`);
+      return;
+    }
+    // 仅暂存方案并刷新预览，结算仍由“执行当日调度”确认后进行。
+    setAssignments(result.assignments);
+    setSelectedIds([]);
+    setError('');
+  }
+
   function assignLetter(letter, courierId) {
+    setSelectedIds((current) => current.filter((id) => id !== letter.id));
     setAssignments((current) => {
       const courierOrders = current
         .filter((assignment) => assignment.courierId === courierId)
@@ -136,6 +177,7 @@ function App() {
       setGame(result.state);
       setReport(result.report);
       setAssignments([]);
+      setSelectedIds([]);
       setPreviewState(null);
     } catch (requestError) {
       if (requestError.status === 409) {
@@ -143,6 +185,7 @@ function App() {
           const { state } = await gameApi.getState();
           setGame(state);
           setAssignments([]);
+          setSelectedIds([]);
           setPreviewState(null);
         } catch {
           // 保留原始冲突提示；下一次操作或刷新会重新同步。
@@ -162,6 +205,7 @@ function App() {
       const { state } = await gameApi.reset();
       setGame(state);
       setAssignments([]);
+      setSelectedIds([]);
       setPreviewState(null);
       setReport(null);
     } catch (requestError) {
@@ -257,6 +301,38 @@ function App() {
               <span className="inbox-progress">{deliveredCount} 封已装载</span>
             </div>
 
+            {unassignedLetters.length > 0 && (
+              <div className="batch-bar">
+                <label className="batch-select-all">
+                  <input
+                    type="checkbox"
+                    checked={selectedLetters.length === unassignedLetters.length}
+                    disabled={busy}
+                    onChange={toggleSelectAll}
+                  />
+                  <span>全选</span>
+                </label>
+                {selectedLetters.length > 0 ? (
+                  <>
+                    <span className="batch-summary">已选 {selectedLetters.length} 封 · {selectedWeight.toFixed(1)} kg</span>
+                    <div className="assign-buttons">
+                      {game.couriers.map((courier) => (
+                        <button key={courier.id} type="button" disabled={busy} onClick={() => assignSelectedBatch(courier.id)}>
+                          <i style={{ background: courier.color }} />
+                          装入{courier.name}
+                        </button>
+                      ))}
+                    </div>
+                    <button type="button" className="batch-clear" disabled={busy} onClick={() => setSelectedIds([])}>
+                      清除选择
+                    </button>
+                  </>
+                ) : (
+                  <span className="batch-hint">勾选多封邮件后，可整批装入同一信使</span>
+                )}
+              </div>
+            )}
+
             <div className="inbox-list">
               {unassignedLetters.length === 0 ? (
                 <div className="inbox-empty">
@@ -265,7 +341,14 @@ function App() {
                   <p>检查下方航线并执行当日调度。</p>
                 </div>
               ) : unassignedLetters.map((letter) => (
-                <LetterCard key={letter.id} letter={letter} islands={game.islands}>
+                <LetterCard
+                  key={letter.id}
+                  letter={letter}
+                  islands={game.islands}
+                  selected={selectedIdSet.has(letter.id)}
+                  selectDisabled={busy}
+                  onToggleSelect={() => toggleSelect(letter.id)}
+                >
                   {letter.status === 'backlog' && <span className="backlog-tag">已积压 {Math.max(0, game.day - letter.day)} 日</span>}
                   <div className="assign-buttons">
                     {game.couriers.map((courier) => (
